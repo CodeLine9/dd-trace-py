@@ -7,6 +7,7 @@ from ddtrace import config
 from ddtrace._trace.pin import Pin
 from ddtrace.constants import _SPAN_MEASURED_KEY
 from ddtrace.constants import SPAN_KIND
+from ddtrace.contrib.internal.trace_utils import set_service_and_source
 from ddtrace.ext import SpanKind
 from ddtrace.ext import SpanTypes
 from ddtrace.ext import db
@@ -83,17 +84,16 @@ class EngineTracer(object):
 
         span = tracer.trace(
             self.name,
-            service=pin.service,
             span_type=SpanTypes.SQL,
             resource=statement,
         )
+        set_service_and_source(span, pin.service, config.sqlalchemy)
         span._set_attribute(COMPONENT, config.sqlalchemy.integration_name)
 
         # set span.kind to the type of operation being performed
         span._set_attribute(SPAN_KIND, SpanKind.CLIENT)
 
-        # PERF: avoid setting via Span.set_tag
-        span.set_metric(_SPAN_MEASURED_KEY, 1)
+        span._set_attribute(_SPAN_MEASURED_KEY, 1)
 
         if not _set_tags_from_url(span, conn.engine.url):
             _set_tags_from_cursor(span, self.vendor, cursor)
@@ -157,4 +157,6 @@ def _set_tags_from_cursor(span, vendor, cursor):
                 if host is not None:
                     span._set_attribute(netx.TARGET_HOST, host)
                     span._set_attribute(netx.SERVER_ADDRESS, host)
-                span.set_metric(netx.TARGET_PORT, int(d.get("port")))
+                port = d.get("port")
+                if port is not None:
+                    span._set_attribute(netx.TARGET_PORT, int(port))

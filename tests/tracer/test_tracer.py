@@ -29,6 +29,7 @@ from ddtrace.constants import USER_REJECT
 from ddtrace.constants import VERSION_KEY
 from ddtrace.contrib.internal.trace_utils import set_user
 from ddtrace.ext import user
+from ddtrace.internal.constants import _SERVICE_SOURCE
 from ddtrace.internal.settings._config import Config
 from ddtrace.internal.writer import AgentWriterInterface
 from ddtrace.trace import Context
@@ -362,7 +363,7 @@ class TracerTestCases(TracerTestCase):
                     next(signals)
                 except StopIteration as e:
                     assert e.value == 10
-                    span.set_metric("num_signals", e.value)
+                    span._set_attribute("num_signals", e.value)
                     break
 
         self.assert_span_count(2)
@@ -391,7 +392,7 @@ class TracerTestCases(TracerTestCase):
         # a weird case where manually calling finish with an unserializable
         # span was causing an loop of serialization.
         with self.trace("parent") as span:
-            span._metrics["as"] = np.int64(1)  # circumvent the data checks
+            span._metrics["as"] = np.int64(1)  # circumvent the data checks  # ast-grep-ignore: span-metrics-access
             span.finish()
 
     def test_tracer_disabled_mem_leak(self):
@@ -597,7 +598,7 @@ class TracerTestCases(TracerTestCase):
             )
             span_keys = list(span.get_tags().keys())
             span_keys.sort()
-            assert span_keys == ["runtime-id", "usr.id"]
+            assert span_keys == [_SERVICE_SOURCE, "runtime-id", "usr.id"]
             assert span.get_tag(user.ID)
             assert span.get_tag(user.EMAIL) is None
             assert span.get_tag(user.SESSION_ID) is None
@@ -1018,6 +1019,20 @@ def test_detect_agentless_env_with_lambda():
     )
 
 
+@pytest.mark.subprocess(env=dict(AWS_LAMBDA_FUNCTION_NAME="my-lambda-func"))
+def test_service_name_defaults_to_lambda_function_name():
+    import ddtrace
+
+    assert ddtrace.config.service == "my-lambda-func"
+
+
+@pytest.mark.subprocess(env=dict(AWS_LAMBDA_FUNCTION_NAME="my-lambda-func", DD_SERVICE="override-svc"))
+def test_dd_service_takes_precedence_over_lambda_function_name():
+    import ddtrace
+
+    assert ddtrace.config.service == "override-svc"
+
+
 def test_tracer_set_runtime_tags():
     with global_tracer.start_span("foobar") as span:
         pass
@@ -1087,7 +1102,7 @@ def test_enable():
 )
 def test_unfinished_span_warning_log():
     """Test that a warning log is emitted when the tracer is shut down with unfinished spans."""
-    from ddtrace.constants import MANUAL_KEEP_KEY
+    from ddtrace.constants import USER_KEEP
     from ddtrace.trace import tracer
 
     # Create two unfinished spans
@@ -1098,12 +1113,12 @@ def test_unfinished_span_warning_log():
     span1.parent_id = 0
     span1.span_id = 456
     span1.start = 1234567890  # Fri Feb 13 2009 23:31:30 GMT (realistic Unix timestamp)
-    span1.set_tag(MANUAL_KEEP_KEY)
+    span1._override_sampling_decision(USER_KEEP)
     span2.trace_id = 123
     span2.parent_id = 456
     span2.span_id = 666
     span2.start = 1987654321  # Wed Oct 17 2033 11:32:01 GMT (future but realistic)
-    span2.set_tag(MANUAL_KEEP_KEY)
+    span2._override_sampling_decision(USER_KEEP)
 
 
 @pytest.mark.subprocess(parametrize={"DD_TRACE_ENABLED": ["true", "false"]})
@@ -1450,14 +1465,14 @@ def test_ctx_distributed(tracer, test_spans):
 def test_manual_keep(tracer, test_spans):
     # On a root span
     with tracer.trace("asdf") as s:
-        s.set_tag(MANUAL_KEEP_KEY)
+        s.set_tag(MANUAL_KEEP_KEY)  # ast-grep-ignore: span-set-tag-manual-keep
     spans = test_spans.pop()
     assert spans[0].get_metric(_SAMPLING_PRIORITY_KEY) is USER_KEEP
 
     # On a child span
     with tracer.trace("asdf"):
         with tracer.trace("child") as s:
-            s.set_tag(MANUAL_KEEP_KEY)
+            s.set_tag(MANUAL_KEEP_KEY)  # ast-grep-ignore: span-set-tag-manual-keep
     spans = test_spans.pop()
     assert spans[0].get_metric(_SAMPLING_PRIORITY_KEY) is USER_KEEP
 
@@ -1466,8 +1481,8 @@ def test_manual_keep_then_drop(tracer, test_spans):
     # Test changing the value before finish.
     with tracer.trace("asdf") as root:
         with tracer.trace("child") as child:
-            child.set_tag(MANUAL_KEEP_KEY)
-        root.set_tag(MANUAL_DROP_KEY)
+            child.set_tag(MANUAL_KEEP_KEY)  # ast-grep-ignore: span-set-tag-manual-keep
+        root.set_tag(MANUAL_DROP_KEY)  # ast-grep-ignore: span-set-tag-manual-drop
     spans = test_spans.pop()
     assert spans[0].get_metric(_SAMPLING_PRIORITY_KEY) is USER_REJECT
 
@@ -1475,14 +1490,14 @@ def test_manual_keep_then_drop(tracer, test_spans):
 def test_manual_drop(tracer, test_spans):
     # On a root span
     with tracer.trace("asdf") as s:
-        s.set_tag(MANUAL_DROP_KEY)
+        s.set_tag(MANUAL_DROP_KEY)  # ast-grep-ignore: span-set-tag-manual-drop
     spans = test_spans.pop()
     assert spans[0].get_metric(_SAMPLING_PRIORITY_KEY) is USER_REJECT
 
     # On a child span
     with tracer.trace("asdf"):
         with tracer.trace("child") as s:
-            s.set_tag(MANUAL_DROP_KEY)
+            s.set_tag(MANUAL_DROP_KEY)  # ast-grep-ignore: span-set-tag-manual-drop
     spans = test_spans.pop()
     assert spans[0].get_metric(_SAMPLING_PRIORITY_KEY) is USER_REJECT
 

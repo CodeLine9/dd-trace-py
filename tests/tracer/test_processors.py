@@ -15,7 +15,6 @@ from ddtrace.constants import _SINGLE_SPAN_SAMPLING_MECHANISM
 from ddtrace.constants import _SINGLE_SPAN_SAMPLING_RATE
 from ddtrace.constants import AUTO_KEEP
 from ddtrace.constants import AUTO_REJECT
-from ddtrace.constants import MANUAL_KEEP_KEY
 from ddtrace.constants import USER_KEEP
 from ddtrace.constants import USER_REJECT
 from ddtrace.ext import SpanTypes
@@ -461,7 +460,7 @@ def test_trace_128bit_processor(trace_id, tracer):
     chunk_root = spans[0]
     assert chunk_root.trace_id == ctx.trace_id
     assert chunk_root.trace_id >= 2**64
-    assert chunk_root._meta[HIGHER_ORDER_TRACE_ID_BITS] == "{:016x}".format(chunk_root.trace_id >> 64)
+    assert chunk_root._get_str_attribute(HIGHER_ORDER_TRACE_ID_BITS) == "{:016x}".format(chunk_root.trace_id >> 64)
 
 
 @pytest.mark.subprocess(
@@ -643,7 +642,7 @@ def test_single_span_sampling_processor_w_tracer_sampling_after_processing(trace
     tracer.flush()
 
     # The trace is updated to be a keep, but we already span sampled child
-    root.set_tag(MANUAL_KEEP_KEY)
+    root._override_sampling_decision(USER_KEEP)
     root.finish()
     assert_span_sampling_decision_tags(child, None, None, None)
     assert child.context.sampling_priority == USER_KEEP

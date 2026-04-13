@@ -17,12 +17,11 @@ pytestmark = pytest.mark.skipif(AGENT_VERSION != "testagent", reason="Tests only
 
 @pytest.fixture
 def stats_tracer(tracer):
-    # _recreate() checks config._trace_compute_stats AND config._trace_writer_native
-    # to decide whether to add stats processor. Stats processor is only added if
-    # _trace_writer_native is False and _trace_compute_stats is True.
-    with override_global_config(dict(_trace_compute_stats=True, _trace_writer_native=False)):
+    # Recreate tracer with stats enabled
+    with override_global_config(dict(_trace_compute_stats=True)):
         tracer._recreate()
         yield tracer
+        tracer.shutdown()
 
 
 class consistent_end_trace(object):
@@ -184,7 +183,7 @@ def test_stats_aggrs(send_once_stats_tracer):
 
     # HTTP status code
     with send_once_stats_tracer.trace(name="op", service="my-svc", span_type="web", resource="/users/list") as span:
-        span.set_tag(http.STATUS_CODE, 200)
+        span._set_attribute(http.STATUS_CODE, 200)
 
     # Resource
     with send_once_stats_tracer.trace(name="op", service="my-svc", span_type="web", resource="/users/view"):
@@ -212,7 +211,7 @@ def test_measured_span(send_once_stats_tracer):
     for _ in range(10):
         with send_once_stats_tracer.trace("parent"):  # Should have stats
             with send_once_stats_tracer.trace("child_stats") as span:  # Should have stats
-                span.set_tag(_SPAN_MEASURED_KEY)
+                span._set_attribute(_SPAN_MEASURED_KEY, 1)
 
 
 @pytest.mark.snapshot()
@@ -235,4 +234,4 @@ def test_single_span_sampling():
     with tracer.trace("parent", service="test"):
         with tracer.trace("child") as child:
             # FIXME: Replace with span sampling rule
-            child.set_metric("_dd.span_sampling.mechanism", 8)
+            child._set_attribute("_dd.span_sampling.mechanism", 8)

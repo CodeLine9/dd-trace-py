@@ -10,7 +10,7 @@ from ddtrace.appsec._constants import APPSEC
 from ddtrace.appsec._constants import DEFAULT
 from ddtrace.appsec._constants import FINGERPRINTING
 from ddtrace.appsec._constants import WAF_DATA_NAMES
-from ddtrace.appsec._ddwaf import waf_module
+from ddtrace.appsec._ddwaf import DDWaf
 from ddtrace.appsec._ddwaf.ddwaf_types import py_ddwaf_builder_get_config_paths
 from ddtrace.appsec._processor import AppSecSpanProcessor
 from ddtrace.appsec._processor import _transform_headers
@@ -34,7 +34,6 @@ except ImportError:
     # handling python 2.X import error
     JSONDecodeError = ValueError  # type: ignore
 
-DDWaf = waf_module()
 
 APPSEC_JSON_TAG = f"meta.{APPSEC.JSON}"
 config_asm = {"_asm_enabled": True}
@@ -162,6 +161,7 @@ def test_headers_collection(tracer):
         "service",
         "meta._dd.rc.client_id",
         "meta._dd.appsec.rc_products",
+        "meta._dd.svc_src",
     ],
 )
 def test_appsec_cookies_no_collection_snapshot(tracer):
@@ -193,6 +193,7 @@ def test_appsec_cookies_no_collection_snapshot(tracer):
         "service",
         "meta._dd.rc.client_id",
         "meta._dd.appsec.rc_products",
+        "meta._dd.svc_src",
     ],
 )
 def test_appsec_body_no_collection_snapshot(tracer):
@@ -323,6 +324,7 @@ def test_ip_update_rules_expired_no_block(tracer):
         "meta._dd.base_service",
         "meta._dd.rc.client_id",
         "meta._dd.appsec.rc_products",
+        "meta._dd.svc_src",
     ],
 )
 def test_appsec_span_tags_snapshot(tracer):
@@ -345,6 +347,7 @@ def test_appsec_span_tags_snapshot(tracer):
         "meta._dd.base_service",
         "meta._dd.rc.client_id",
         "meta._dd.appsec.rc_products",
+        "meta._dd.svc_src",
     ],
 )
 def test_appsec_span_tags_snapshot_with_errors(tracer):
@@ -386,6 +389,48 @@ def test_ddwaf_not_raises_exception():
             DEFAULT.APPSEC_OBFUSCATION_PARAMETER_KEY_REGEXP.encode("utf-8"),
             DEFAULT.APPSEC_OBFUSCATION_PARAMETER_VALUE_REGEXP.encode("utf-8"),
         )
+
+
+@pytest.mark.subprocess(err="Disabling AppSec: libddwaf failed to load (mock libddwaf load failure)\n")
+def test_appsec_abort_on_waf_failure():
+    """Simulate a libddwaf loading error
+
+    AppSecSpanProcessor enablement occurs in `load_appsec` with `override_global_config` and should abort
+    completely if an error is found in the bindings layer.
+    """
+    import ctypes
+
+    import mock
+
+    from ddtrace.internal.settings.asm import config as asm_config
+    from tests.utils import override_global_config
+
+    original_cdll = ctypes.CDLL
+
+    ERROR_MESSAGE = "mock libddwaf load failure"
+
+    def _raise_on_libddwaf(path, *args, **kwargs):
+        if path == asm_config._asm_libddwaf:
+            raise OSError(ERROR_MESSAGE)
+        return original_cdll(path, *args, **kwargs)
+
+    with (
+        mock.patch("ctypes.CDLL", side_effect=_raise_on_libddwaf),
+    ):
+        with override_global_config(
+            dict(
+                _asm_enabled=True,
+                _asm_can_be_enabled=True,
+                _asm_rc_enabled=True,
+                _api_security_active=True,
+                _load_modules=True,
+            )
+        ):
+            assert asm_config._asm_libddwaf_available is False
+            assert asm_config._asm_enabled is False
+            assert asm_config._asm_can_be_enabled is False
+            assert asm_config._asm_rc_enabled is False
+            assert asm_config._load_modules is False
 
 
 def test_obfuscation_parameter_key_empty():
@@ -784,7 +829,7 @@ def test_required_addresses():
 @pytest.mark.parametrize("ephemeral", ["LFI_ADDRESS", "PROCESSOR_SETTINGS"])
 @mock.patch("ddtrace.appsec._ddwaf.waf.DDWaf.run")
 def test_ephemeral_addresses(mock_run, persistent, ephemeral):
-    from ddtrace.appsec._ddwaf.waf_stubs import DDWaf_result
+    from ddtrace.appsec._utils import DDWaf_result
     from ddtrace.appsec._utils import _observator
     from ddtrace.trace import tracer
 
@@ -814,7 +859,7 @@ def test_ephemeral_addresses(mock_run, persistent, ephemeral):
 
 @mock.patch("ddtrace.appsec._ddwaf.waf.DDWaf.run")
 def test_waf_action_null_ephemeral_addresses(mock_run):
-    from ddtrace.appsec._ddwaf.waf_stubs import DDWaf_result
+    from ddtrace.appsec._utils import DDWaf_result
     from ddtrace.appsec._utils import _observator
     from ddtrace.trace import tracer
 

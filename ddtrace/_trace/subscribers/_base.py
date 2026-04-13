@@ -10,7 +10,7 @@ from ddtrace._trace.span import Span
 from ddtrace.constants import _SPAN_MEASURED_KEY
 from ddtrace.constants import SPAN_KIND
 from ddtrace.contrib import trace_utils
-from ddtrace.contrib.internal.trace_utils import maybe_set_service_source_tag
+from ddtrace.contrib.internal.trace_utils import set_service_and_source
 from ddtrace.internal import core
 from ddtrace.internal.constants import COMPONENT
 from ddtrace.internal.core.subscriber import ContextSubscriber
@@ -24,19 +24,18 @@ def _finish_span(
     ctx: core.ExecutionContext[TracingEventType],
     exc_info: tuple[Optional[type], Optional[BaseException], Optional[TracebackType]],
 ) -> None:
-    """
-    Finish the span in the context.
-    If no span is present, do nothing.
+    """Finish the span in the context.
 
-    Reimplementing finish span here prevents circular import. Once every integration
-    adopted events API, trace_handlers _finish_span should be completely removed.
+    If no span is present, do nothing.
+    Reimplementing finish span here prevents circular import with trace_handlers.
+    Once every integration adopts the events API, trace_handlers._finish_span
+    should be completely removed.
     """
     span = ctx.span
     if not span:
         return
 
-    integration_config = ctx.get_item("integration_config")
-    maybe_set_service_source_tag(span, integration_config or dict())
+    set_service_and_source(span, ctx.get_item("service"), ctx.event.integration_config or dict())
 
     exc_type, exc_value, exc_traceback = exc_info
     if exc_type and exc_value and exc_traceback:
@@ -59,7 +58,7 @@ def _start_span(ctx: core.ExecutionContext[TracingEventType]) -> Span:
     event = ctx.event
 
     activate_distributed_headers = ctx.get_item("activate_distributed_headers")
-    integration_config = ctx.get_item("integration_config")
+    integration_config = event.integration_config
     if integration_config and activate_distributed_headers:
         trace_utils.activate_distributed_headers(
             tracer,
@@ -86,14 +85,16 @@ def _start_span(ctx: core.ExecutionContext[TracingEventType]) -> Span:
     if default_child_of is not None:
         span_kwargs.setdefault("child_of", default_child_of)
 
-    span = tracer.start_span(event.span_name, **span_kwargs)
-
-    span._meta.update({COMPONENT: event.component, SPAN_KIND: event.span_kind, **event.tags})
+    span = tracer.start_span(event.operation_name, **span_kwargs)
+    span._set_attribute(COMPONENT, event.component)
+    span._set_attribute(SPAN_KIND, event.span_kind)
+    for _k, _v in event.tags.items():
+        span._set_attribute(_k, _v)
 
     if event.measured:
-        span.set_metric(_SPAN_MEASURED_KEY, 1)
+        span._set_attribute(_SPAN_MEASURED_KEY, 1)
 
-    maybe_set_service_source_tag(span, integration_config or dict())
+    set_service_and_source(span, ctx.get_item("service"), integration_config or dict())
     ctx.span = span
 
     if config._inferred_proxy_services_enabled:

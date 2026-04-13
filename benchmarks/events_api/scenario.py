@@ -20,7 +20,7 @@ from ddtrace.trace import tracer
 class BenchmarkTracingEvent(TracingEvent):
     event_name = "events.api.event"
 
-    span_name = "benchmarking"
+    operation_name = "benchmarking"
     span_type = "base"
     span_kind = "client"
     component = "test"
@@ -53,7 +53,7 @@ class EventsAPIScenario(bm.Scenario):
                 span = ctx.span
                 span._set_attribute("http.url", ctx.get_item("url"))
                 span._set_attribute("http.method", ctx.get_item("method"))
-                span.set_metric("http.status_code", ctx.get_item("status_code"))
+                span._set_attribute("http.status_code", ctx.get_item("status_code"))
 
             def _context_ended_handler(ctx: core.ExecutionContext, exc_info) -> None:
                 _finish_span(ctx, exc_info)
@@ -86,7 +86,7 @@ class EventsAPIScenario(bm.Scenario):
                     event: BenchmarkTracingEvent = ctx.event
                     span._set_attribute("http.url", event.url)
                     span._set_attribute("http.method", event.method)
-                    span.set_metric("http.status_code", event.status_code)
+                    span._set_attribute("http.status_code", event.status_code)
 
             for _ in range(loops):
                 with core.context_with_event(
@@ -94,6 +94,7 @@ class EventsAPIScenario(bm.Scenario):
                         service="base",
                         url="myurl.com",
                         component="test",
+                        integration_config={},
                         method="GET",
                         status_code=200,
                         resource="test",
@@ -134,7 +135,7 @@ class EventsAPIScenario(bm.Scenario):
                 span._set_attribute(SPAN_KIND, "client")
                 span._set_attribute("http.url", "myurl.com")
                 span._set_attribute("http.method", "GET")
-                span.set_metric("http.status_code", 200)
+                span._set_attribute("http.status_code", 200)
                 span.finish()
 
         if self.api == "core":

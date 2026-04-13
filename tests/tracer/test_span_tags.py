@@ -12,9 +12,14 @@ import pytest
 
 from ddtrace.constants import _SPAN_MEASURED_KEY
 from ddtrace.constants import ENV_KEY
+from ddtrace.constants import MANUAL_DROP_KEY
+from ddtrace.constants import MANUAL_KEEP_KEY
 from ddtrace.constants import SERVICE_KEY
 from ddtrace.constants import SERVICE_VERSION_KEY
+from ddtrace.constants import USER_KEEP
+from ddtrace.constants import USER_REJECT
 from ddtrace.constants import VERSION_KEY
+from ddtrace.ext import http
 from ddtrace.trace import Span
 from tests.utils import assert_is_measured
 from tests.utils import assert_is_not_measured
@@ -90,11 +95,11 @@ def test_set_tag_metric():
 
 def test_set_valid_metrics():
     s = Span(name="test.span")
-    s.set_metric("a", 0)
-    s.set_metric("b", -12)
-    s.set_metric("c", 12.134)
-    s.set_metric("d", 1231543543265475686787869123)
-    s.set_metric("e", "12.34")
+    s.set_metric("a", 0)  # ast-grep-ignore: span-set-metric
+    s.set_metric("b", -12)  # ast-grep-ignore: span-set-metric
+    s.set_metric("c", 12.134)  # ast-grep-ignore: span-set-metric
+    s.set_metric("d", 1231543543265475686787869123)  # ast-grep-ignore: span-set-metric
+    s.set_metric("e", "12.34")  # ast-grep-ignore: span-set-metric
     expected = {
         "a": 0,
         "b": -12,
@@ -112,14 +117,14 @@ def test_set_invalid_metric():
 
     for i, m in enumerate(invalid_metrics):
         k = str(i)
-        s.set_metric(k, m)
+        s.set_metric(k, m)  # ast-grep-ignore: span-set-metric
         assert s.get_metric(k) is None
 
 
 def test_set_numpy_metric():
     np = pytest.importorskip("numpy")
     s = Span(name="test.span")
-    s.set_metric("a", np.int64(1))
+    s.set_metric("a", np.int64(1))  # ast-grep-ignore: span-set-metric
     assert s.get_metric("a") == 1
     assert type(s.get_metric("a")) == float
 
@@ -191,6 +196,18 @@ def test_set_tag_service_key():
     assert s.get_tag(SERVICE_KEY) == "my-service"
 
 
+def test_set_tag_manual_keep():
+    s = Span(name="test.span")
+    s.set_tag(MANUAL_KEEP_KEY)  # ast-grep-ignore: span-set-tag-manual-keep
+    assert s.context.sampling_priority == USER_KEEP
+
+
+def test_set_tag_manual_drop():
+    s = Span(name="test.span")
+    s.set_tag(MANUAL_DROP_KEY)  # ast-grep-ignore: span-set-tag-manual-drop
+    assert s.context.sampling_priority == USER_REJECT
+
+
 # ---------------------------------------------------------------------------
 # Tests moved from standalone functions in test_span.py
 # ---------------------------------------------------------------------------
@@ -214,7 +231,7 @@ def test_set_tag_service_key():
 )
 def test_set_tag_measured(value, assertion):
     s = Span(name="test.span")
-    s.set_tag(_SPAN_MEASURED_KEY, value)
+    s.set_tag(_SPAN_MEASURED_KEY, value)  # ast-grep-ignore: span-set-tag-measured
     assertion(s)
 
 
@@ -226,19 +243,19 @@ def test_set_tag_measured_not_set():
 
 def test_set_tag_measured_no_value():
     s = Span(name="test.span")
-    s.set_tag(_SPAN_MEASURED_KEY)
+    s.set_tag(_SPAN_MEASURED_KEY)  # ast-grep-ignore: span-set-tag-measured
     assert_is_measured(s)
 
 
 def test_set_tag_measured_change_value():
     s = Span(name="test.span")
-    s.set_tag(_SPAN_MEASURED_KEY, True)
+    s.set_tag(_SPAN_MEASURED_KEY, True)  # ast-grep-ignore: span-set-tag-measured
     assert_is_measured(s)
 
-    s.set_tag(_SPAN_MEASURED_KEY, False)
+    s.set_tag(_SPAN_MEASURED_KEY, False)  # ast-grep-ignore: span-set-tag-measured
     assert_is_not_measured(s)
 
-    s.set_tag(_SPAN_MEASURED_KEY)
+    s.set_tag(_SPAN_MEASURED_KEY)  # ast-grep-ignore: span-set-tag-measured
     assert_is_measured(s)
 
 
@@ -565,5 +582,31 @@ def test_set_tag_visible_via_get_attribute():
 
 def test_set_metric_visible_via_get_attribute():
     s = Span(name="test.span")
-    s.set_metric("key", 3.14)
+    s._set_attribute("key", 3.14)
     assert s._get_attribute("key") == 3.14
+
+
+# ---------------------------------------------------------------------------
+# http.STATUS_CODE coercion tests
+# ---------------------------------------------------------------------------
+
+
+def test_set_attribute_http_status_code_int():
+    # int values must be coerced to str and stored in _meta, not _metrics
+    s = Span(name="test.span")
+    s._set_attribute(http.STATUS_CODE, 200)
+    assert s._get_attribute(http.STATUS_CODE) == "200"
+
+
+def test_set_attribute_http_status_code_str():
+    # str values must stay as str and be stored in _meta
+    s = Span(name="test.span")
+    s._set_attribute(http.STATUS_CODE, "404")
+    assert s._get_attribute(http.STATUS_CODE) == "404"
+
+
+def test_set_attribute_http_status_code_readable_via_get_tag():
+    # must remain accessible through the public get_tag API
+    s = Span(name="test.span")
+    s._set_attribute(http.STATUS_CODE, 500)
+    assert s.get_tag(http.STATUS_CODE) == "500"

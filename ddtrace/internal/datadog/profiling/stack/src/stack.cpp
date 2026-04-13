@@ -228,6 +228,49 @@ stack_set_adaptive_sampling(PyObject* Py_UNUSED(self), PyObject* args)
 }
 
 static PyObject*
+stack_set_target_overhead(PyObject* Py_UNUSED(self), PyObject* args)
+{
+    double target_overhead;
+
+    if (!PyArg_ParseTuple(args, "d", &target_overhead)) {
+        return NULL;
+    }
+
+    // Convert from percentage (0-100) to fraction (0-1)
+    Sampler::get().set_target_overhead(target_overhead / 100.0);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject*
+stack_set_max_sampling_period(PyObject* Py_UNUSED(self), PyObject* args)
+{
+    unsigned int max_interval_us;
+
+    if (!PyArg_ParseTuple(args, "I", &max_interval_us)) {
+        return NULL;
+    }
+
+    Sampler::get().set_max_sampling_period(max_interval_us);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject*
+stack_set_max_threads(PyObject* Py_UNUSED(self), PyObject* args)
+{
+    unsigned int max_threads;
+
+    if (!PyArg_ParseTuple(args, "I", &max_threads)) {
+        return NULL;
+    }
+
+    Sampler::get().set_max_threads_per_sample(max_threads);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject*
 stack_set_uvloop_mode(PyObject* Py_UNUSED(self), PyObject* args)
 {
     uintptr_t thread_id;
@@ -421,6 +464,7 @@ static PyMethodDef native_call_handler_def = {
     "native_call_handler",
     // Double cast: METH_FASTCALL signature (PyObject*, PyObject*const*, Py_ssize_t) differs from
     // PyCFunction (PyObject*, PyObject*), but CPython dispatches correctly based on ml_flags.
+    // NOLINTNEXTLINE(bugprone-casting-through-void)
     reinterpret_cast<PyCFunction>(reinterpret_cast<void*>(native_call_handler)),
     METH_FASTCALL,
     "C callback for sys.monitoring CALL events"
@@ -658,6 +702,15 @@ static PyMethodDef stack_methods[] = {
     { "update_greenlet_frame", update_greenlet_frame, METH_VARARGS, "Update the frame of a greenlet" },
 
     { "set_adaptive_sampling", stack_set_adaptive_sampling, METH_VARARGS, "Set adaptive sampling" },
+    { "set_target_overhead",
+      stack_set_target_overhead,
+      METH_VARARGS,
+      "Set target overhead for adaptive sampling (e.g. 10 for 10% of the app's own CPU time)" },
+    { "set_max_sampling_period",
+      stack_set_max_sampling_period,
+      METH_VARARGS,
+      "Set max sampling period for adaptive sampling" },
+    { "set_max_threads", stack_set_max_threads, METH_VARARGS, "Set max threads to sample per cycle (0 = unlimited)" },
     { "set_uvloop_mode", stack_set_uvloop_mode, METH_VARARGS, "Enable uvloop-specific stack unwinding for a thread" },
     // Native call monitoring
     { "start_native_monitoring",

@@ -3,6 +3,7 @@
 #include "sampler.hpp"
 #include "thread_span_links.hpp"
 
+#include "dd_wrapper/include/clock.hpp"
 #include "dd_wrapper/include/sample_manager.hpp"
 
 #include "echion/echion_sampler.h"
@@ -31,16 +32,9 @@ StackRenderer::render_thread_begin(PyThreadState* tstate,
         return;
     }
 
-    // Get the current time in ns in a way compatible with python's time.monotonic_ns(), which is backed by
-    // clock_gettime(CLOCK_MONOTONIC) on linux and mach_absolute_time() on macOS.
-    // This is not the same as std::chrono::steady_clock, which is backed by clock_gettime(CLOCK_MONOTONIC_RAW)
-    // (although this is underspecified in the standard)
-    int64_t now_ns = 0;
-    timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        now_ns = static_cast<int64_t>(ts.tv_sec) * 1'000'000'000LL + static_cast<int64_t>(ts.tv_nsec);
-        sample->push_monotonic_ns(now_ns);
-    }
+    // See clock.hpp for platform-specific details.
+    const int64_t now_ns = get_monotonic_ns();
+    sample->push_monotonic_ns(now_ns);
 
     // Save the thread information in case we observe a task on the thread
     thread_state.id = thread_id;
@@ -130,6 +124,26 @@ StackRenderer::render_frame(Frame& frame)
 
     auto line = frame.line;
 
+    // DEV: Echion pushes a dummy frame containing task name, and its line
+    // number is set to 0.
+    if (line == 0) {
+        if (!pushed_task_name) {
+            std::string_view name_str;
+            auto maybe_name_str = string_table.lookup(frame.name);
+            if (maybe_name_str) {
+                name_str = maybe_name_str->get();
+            } else {
+                name_str = missing_name;
+            }
+
+            sample->push_task_name(name_str);
+            pushed_task_name = true;
+        }
+        // And return early to avoid pushing task name as a frame
+        // TODO: We may want to do that for clarity, actually. Let's reconvene.
+        return;
+    }
+
     string_id name_id;
     auto maybe_name_id = string_id_cache.find(frame.name);
     if (maybe_name_id == string_id_cache.end()) {
@@ -149,26 +163,6 @@ StackRenderer::render_frame(Frame& frame)
         string_id_cache.insert({ frame.name, name_id });
     } else {
         name_id = maybe_name_id->second;
-    }
-
-    // DEV: Echion pushes a dummy frame containing task name, and its line
-    // number is set to 0.
-    if (line == 0) {
-        if (!pushed_task_name) {
-            std::string_view name_str;
-            auto maybe_name_str = string_table.lookup(frame.name);
-            if (maybe_name_str) {
-                name_str = maybe_name_str->get();
-            } else {
-                name_str = missing_name;
-            }
-
-            sample->push_task_name(name_str);
-            pushed_task_name = true;
-        }
-        // And return early to avoid pushing task name as a frame
-        // TODO: We may want to do that for clarity, actually. Let's reconvene.
-        return;
     }
 
     string_id filename_id;
